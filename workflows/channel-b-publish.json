@@ -1,0 +1,212 @@
+{
+  "name": "Channel B - Publish (Drive export to YouTube private upload)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_FINISHED_VIDEOS_FOLDER_ID"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "t1",
+      "name": "New Finished Video",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "google-drive", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "m1",
+              "leftValue": "={{ $json.name.toLowerCase() }}",
+              "rightValue": ".mp4",
+              "operator": { "type": "string", "operation": "endsWith" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "t2",
+      "name": "Is MP4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "d1", "name": "run_id", "value": "={{ $json.name.replace(/\\.mp4$/i, '') }}", "type": "string" },
+            { "id": "d2", "name": "file_id", "value": "={{ $json.id }}", "type": "string" },
+            { "id": "d3", "name": "kit_folder_id", "value": "REPLACE_WITH_EDIT_KIT_FOLDER_ID", "type": "string" },
+            { "id": "d4", "name": "notify_email", "value": "REPLACE_WITH_YOUR_EMAIL", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "t3",
+      "name": "Derive Run ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 200]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "name",
+        "queryString": "={{ $json.run_id + '-package.json' }}",
+        "returnAll": false,
+        "limit": 1,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "={{ $json.kit_folder_id }}"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "t4",
+      "name": "Find Package",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [660, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "google-drive", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" },
+        "options": {}
+      },
+      "id": "t5",
+      "name": "Download Package",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [880, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "google-drive", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const buf = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst pkg = JSON.parse(buf.toString('utf8'));\nconst base = $('Derive Run ID').first().json;\nreturn [{ json: { run_id: base.run_id, notify_email: base.notify_email, title: pkg.title, description: pkg.description, tags: (pkg.tags || []).join(',') } }];"
+      },
+      "id": "t6",
+      "name": "Parse Package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Derive Run ID').first().json.file_id }}"
+        },
+        "options": {}
+      },
+      "id": "t7",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1320, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "google-drive", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Parse Package').first().json.title }}",
+        "regionCode": "US",
+        "categoryId": "27",
+        "binaryProperty": "data",
+        "options": {
+          "description": "={{ $('Parse Package').first().json.description }}",
+          "tags": "={{ $('Parse Package').first().json.tags }}",
+          "privacyStatus": "private",
+          "defaultLanguage": "en",
+          "selfDeclaredMadeForKids": false
+        }
+      },
+      "id": "t8",
+      "name": "Upload to YouTube (Private)",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [1540, 200],
+      "credentials": {
+        "youTubeOAuth2Api": { "id": "youtube-oauth", "name": "YouTube account" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Parse Package').first().json.notify_email }}",
+        "subject": "={{ 'Uploaded as private: ' + $('Parse Package').first().json.title }}",
+        "emailType": "html",
+        "message": "={{ '<p>Run ' + $('Parse Package').first().json.run_id + ' is uploaded as a private video.</p><p><a href=\"https://studio.youtube.com/video/' + $json.id + '/edit\">Open in YouTube Studio</a> to add the thumbnail, check it over and set the publish time.</p>' }}",
+        "options": {}
+      },
+      "id": "t9",
+      "name": "Email Upload Link",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1760, 200],
+      "credentials": {
+        "gmailOAuth2": { "id": "gmail-oauth", "name": "Gmail account" }
+      }
+    }
+  ],
+  "connections": {
+    "New Finished Video": {
+      "main": [[{ "node": "Is MP4", "type": "main", "index": 0 }]]
+    },
+    "Is MP4": {
+      "main": [[{ "node": "Derive Run ID", "type": "main", "index": 0 }], []]
+    },
+    "Derive Run ID": {
+      "main": [[{ "node": "Find Package", "type": "main", "index": 0 }]]
+    },
+    "Find Package": {
+      "main": [[{ "node": "Download Package", "type": "main", "index": 0 }]]
+    },
+    "Download Package": {
+      "main": [[{ "node": "Parse Package", "type": "main", "index": 0 }]]
+    },
+    "Parse Package": {
+      "main": [[{ "node": "Download Video", "type": "main", "index": 0 }]]
+    },
+    "Download Video": {
+      "main": [[{ "node": "Upload to YouTube (Private)", "type": "main", "index": 0 }]]
+    },
+    "Upload to YouTube (Private)": {
+      "main": [[{ "node": "Email Upload Link", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
